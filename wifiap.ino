@@ -9,6 +9,9 @@
 #define PASS_ADDR 32
 #define FLAG_ADDR 95
 
+#define GPIO_2 2 // GPIO2 for onboard LED for DOOR sensor
+bool door_open = false; // 初始狀態為關閉
+
 ESP8266WebServer server(80);
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 8 * 3600, 60000);
@@ -117,16 +120,23 @@ String htmlPage(String message = "", String timeInfo = "") {
         <button type="submit" class="btn btn-danger">結束連線</button>
       </form>
     )rawliteral";
-
     page += R"rawliteral(
-      <script>
-      setInterval(() => {
-        fetch('/time').then(response => response.text()).then(data => {
-          document.getElementById('time').innerText = data;
-        });
-      }, 1000);
-      </script>
-    )rawliteral";
+          <div class="mt-3">
+            <button onclick="checkStatus()" class="btn btn-info">檢查系統狀態</button>
+            <div id="gpioStatus" class="mt-2"></div>
+          </div>
+          <script>
+          function checkStatus() {
+            Promise.all([
+              fetch('/gpio').then(response => response.text()),
+              fetch('/time').then(response => response.text())
+            ]).then(([gpioData, timeData]) => {
+              document.getElementById('gpioStatus').innerHTML = gpioData;
+              document.getElementById('time').innerText = timeData;
+            });
+          }
+          </script>
+        )rawliteral";
   }
 
   if (message != "") {
@@ -166,11 +176,16 @@ void handleConnect() {
     saveWiFiInfo(wifiSSID, wifiPASS);
     timeClient.begin();
     server.send(200, "text/html", htmlPage("連線成功並已儲存設定!", getDateTime()));
+    Serial.print(getDateTime());
+    Serial.println(" - 連線成功並已儲存設定!");
+
   } else {
     isConnected = false;
     WiFi.mode(WIFI_AP);
     WiFi.softAP(apSSID, apPassword);
     server.send(200, "text/html", htmlPage("連線失敗，請重新輸入!", ""));
+    Serial.print(getDateTime());
+    Serial.println(" - 連線失敗，請重新輸入!");
   }
 }
 
@@ -182,29 +197,50 @@ void handleDisconnect() {
   WiFi.mode(WIFI_AP);
   WiFi.softAP(apSSID, apPassword);
   server.send(200, "text/html", htmlPage("已結束連線，並清除設定", ""));
+  Serial.print(getDateTime());
+  Serial.println(" - 已結束連線，並清除設定");
 }
 
 void handleTime() {
   server.send(200, "text/plain", getDateTime());
 }
 
+void handleGPIO() {
+  int state = digitalRead(GPIO_2);
+  String status;
+  if (state == LOW) {
+    status = "<div class='text-danger'>門窗狀態：開啟</div>";
+    Serial.println("門窗狀態：開啟");
+  } else {
+    status = "<div class='text-success'>門窗狀態：關閉</div>";
+    Serial.println("門窗狀態：關閉");
+  }
+  server.send(200, "text/html", status);
+}
+
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
+  pinMode(GPIO_2, INPUT); // DOOR sensor pin
+  Serial.println("系統啟動中...");
+
   if (loadWiFiInfo()) {
     WiFi.mode(WIFI_STA);
     WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
 
     int attempt = 0;
     while (WiFi.status() != WL_CONNECTED && attempt < 20) {
-      delay(500);
+      Serial.println("Wifi連線失敗, 重試.....");
+      delay(1000);
       attempt++;
     }
 
     if (WiFi.status() == WL_CONNECTED) {
       isConnected = true;
+      Serial.println("Wifi已連線");
       timeClient.begin();
     } else {
       isConnected = false;
+      Serial.println("Wifi已斷線, 啟動AP模式");
       WiFi.mode(WIFI_AP);
       WiFi.softAP(apSSID, apPassword);
     }
@@ -217,11 +253,29 @@ void setup() {
   server.on("/connect", HTTP_POST, handleConnect);
   server.on("/disconnect", HTTP_POST, handleDisconnect);
   server.on("/time", handleTime);
+  server.on("/gpio", HTTP_GET, handleGPIO);
   server.begin();
 }
 
 void loop() {
+  // 讀取 DOOR sensor 狀態
+  int doorState = digitalRead(GPIO_2);
+
+  // 檢查狀態是否有變化
+  if (doorState == LOW && !door_open) {
+    door_open = true;
+    Serial.println("DOOR sensor 開啟");
+    // 可在此觸發其他通知機制（如蜂鳴器、推播等）
+  } else if (doorState == HIGH && door_open) {
+    door_open = false;
+    Serial.println("DOOR sensor 關閉");
+    // 可在此觸發其他通知機制
+  }
+  // 注意：server.send() 只能在 HTTP 請求時呼叫，不能在 loop 主動推送網頁
+  // 若要網頁自動更新，建議用 AJAX 輪詢 /gpio 或 WebSocket 技術
+  
   server.handleClient();
+  
   if (isConnected) {
     timeClient.update();
     if (WiFi.status() != WL_CONNECTED) {
