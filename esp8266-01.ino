@@ -4,10 +4,13 @@
 #include <NTPClient.h>
 #include <EEPROM.h>
 
-#define EEPROM_SIZE 96
+#define EEPROM_SIZE 192
 #define SSID_ADDR 0
 #define PASS_ADDR 32
 #define FLAG_ADDR 95
+#define TIMEMODE_ADDR 96
+#define EMAIL_ADDR 128
+#define EMAIL_MAXLEN 63
 
 #define GPIO_2 2 // GPIO2 for onboard LED for DOOR sensor
 bool door_open = false; // 初始狀態為關閉
@@ -25,6 +28,39 @@ const char *apPassword = "12345678";
 
 unsigned long lastReconnectAttempt = 0;
 const unsigned long reconnectInterval = 10000; // 每 10 秒嘗試一次
+
+// 新增全域變數儲存時間設定
+String timeMode = "Full-Time"; // 預設值
+// 新增全域變數儲存郵件通知名單
+String alertEmails = ""; // 預設為空
+
+// 儲存時間設定與郵件通知到 EEPROM
+void saveSettings() {
+  EEPROM.begin(EEPROM_SIZE);
+  // 儲存 timeMode
+  for (int i = 0; i < 31; i++) {
+    EEPROM.write(TIMEMODE_ADDR + i, (i < timeMode.length()) ? timeMode[i] : 0);
+  }
+  // 儲存 alertEmails
+  for (int i = 0; i < EMAIL_MAXLEN; i++) {
+    EEPROM.write(EMAIL_ADDR + i, (i < alertEmails.length()) ? alertEmails[i] : 0);
+  }
+  EEPROM.commit();
+  EEPROM.end();
+}
+
+// 讀取時間設定與郵件通知
+void loadSettings() {
+  EEPROM.begin(EEPROM_SIZE);
+  char tm[32], em[EMAIL_MAXLEN + 1];
+  for (int i = 0; i < 31; i++) tm[i] = EEPROM.read(TIMEMODE_ADDR + i);
+  tm[31] = 0;
+  for (int i = 0; i < EMAIL_MAXLEN; i++) em[i] = EEPROM.read(EMAIL_ADDR + i);
+  em[EMAIL_MAXLEN] = 0;
+  if (tm[0] != 0) timeMode = String(tm);
+  if (em[0] != 0) alertEmails = String(em);
+  EEPROM.end();
+}
 
 void saveWiFiInfo(String ssid, String pass) {
   EEPROM.begin(EEPROM_SIZE);
@@ -115,6 +151,27 @@ String htmlPage(String message = "", String timeInfo = "") {
   } else {
     page += "<p><b>已連線至:</b> " + wifiSSID + "</p>";
     page += "<p><b>目前時間:</b> <span id='time'>" + timeInfo + "</span></p>";
+    // 新增時間設定與郵件通知表單
+    page += R"rawliteral(
+      <form action="/settime" method="POST" class="mb-3">
+        <label for="timemode" class="form-label">時間設定</label>
+        <select class="form-select" name="timemode" id="timemode">
+          <option value="Full-Time")rawliteral";
+    if (timeMode == "Full-Time") page += " selected";
+    page += R"rawliteral(>Full-Time</option>
+          <option value="23:00-06:00")rawliteral";
+    if (timeMode == "23:00-06:00") page += " selected";
+    page += R"rawliteral(>23:00-06:00</option>
+        </select>
+        <div class="mt-3">
+          <label for="emails" class="form-label">郵件通知 (多個請用 ; 分隔)</label>
+          <input type="text" class="form-control" name="emails" id="emails" placeholder="user1@example.com;user2@example.com" value=")rawliteral";
+    page += alertEmails;
+    page += R"rawliteral(">
+        </div>
+        <button type="submit" class="btn btn-secondary mt-2">套用</button>
+      </form>
+    )rawliteral";
     page += R"rawliteral(
       <form action="/disconnect" method="POST">
         <button type="submit" class="btn btn-danger">結束連線</button>
@@ -218,10 +275,29 @@ void handleGPIO() {
   server.send(200, "text/html", status);
 }
 
+// 修改處理時間設定的 handler，加入郵件欄位
+void handleSetTime() {
+  if (server.hasArg("timemode")) {
+    timeMode = server.arg("timemode");
+    Serial.print("時間設定已變更為: ");
+    Serial.println(timeMode);
+  }
+  if (server.hasArg("emails")) {
+    alertEmails = server.arg("emails");
+    Serial.print("郵件通知已變更為: ");
+    Serial.println(alertEmails);
+  }
+  saveSettings(); // 設定後存入 EEPROM
+  String timeStr = isConnected ? getDateTime() : "";
+  server.send(200, "text/html", htmlPage("設定已更新", timeStr));
+}
+
 void setup() {
   Serial.begin(9600);
   pinMode(GPIO_2, INPUT); // DOOR sensor pin
   Serial.println("系統啟動中...");
+
+  loadSettings(); // 開機時讀取時間設定與郵件通知
 
   if (loadWiFiInfo()) {
     WiFi.mode(WIFI_STA);
@@ -254,6 +330,7 @@ void setup() {
   server.on("/disconnect", HTTP_POST, handleDisconnect);
   server.on("/time", handleTime);
   server.on("/gpio", HTTP_GET, handleGPIO);
+  server.on("/settime", HTTP_POST, handleSetTime);
   server.begin();
 }
 
@@ -264,15 +341,33 @@ void loop() {
   // 檢查狀態是否有變化
   if (doorState == LOW && !door_open) {
     door_open = true;
-    Serial.println("DOOR sensor 開啟");
+    Serial.println("DOOR sensor 主動偵測到開啟");
+    // 判斷是否在通知時段
+    bool notify = false;
+    if (timeMode == "Full-Time") {
+      notify = true;
+    } else if (timeMode == "23:00-06:00") {
+      time_t rawTime = timeClient.getEpochTime();
+      struct tm *timeinfo = localtime(&rawTime);
+      int hour = timeinfo->tm_hour;
+      // 23:00~23:59 或 0:00~5:59
+      if (hour >= 23 || hour < 6) notify = true;
+    }
+
+    if (notify && alertEmails.length() > 0) {
+      // 寄送通知信件
+      Serial.print("寄送通知信件給: ");
+      Serial.println(alertEmails);
+      // 這裡可呼叫 SMTP 函式或其他通知機制
+      // sendEmail(alertEmails, "門窗開啟警報", "門窗於 " + getDateTime() + " 被開啟!");
+    }
     // 可在此觸發其他通知機制（如蜂鳴器、推播等）
+
   } else if (doorState == HIGH && door_open) {
     door_open = false;
-    Serial.println("DOOR sensor 關閉");
+    Serial.println("DOOR sensor 主動偵測到關閉");
     // 可在此觸發其他通知機制
   }
-  // 注意：server.send() 只能在 HTTP 請求時呼叫，不能在 loop 主動推送網頁
-  // 若要網頁自動更新，建議用 AJAX 輪詢 /gpio 或 WebSocket 技術
   
   server.handleClient();
   
