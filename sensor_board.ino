@@ -8,13 +8,14 @@ const int sensor = A2; // the number of the sensor analog input pin
 const int esp32_gpio = 7; // the number of the ESP32 GPIO pin
 const int threshold = 500; // the threshold of the sensor analog input
 const int timeout = 3000; // the timeout of the sensor analog input
-int lastTime = 0;
+unsigned long lastTime;
 
 void setup() {
-  // put your setup code here, to run once:
   pinMode(ledpin, OUTPUT);
   pinMode(sensor, INPUT);
   pinMode(esp32_gpio, OUTPUT);
+  digitalWrite(esp32_gpio, HIGH); // ESP-01 GPIO2 開機時要保持高電位
+  delay(1000);
 }
 
 void loop() {
