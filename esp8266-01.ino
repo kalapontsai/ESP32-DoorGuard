@@ -3,6 +3,15 @@
 #include <WiFiUdp.h>
 #include <NTPClient.h>
 #include <EEPROM.h>
+#include <ESP_Mail_Client.h>  // 引入 SMTP 函式庫
+
+#define SMTP_HOST "mail.elhomeo.com"
+#define SMTP_PORT 465
+#define SENDER_EMAIL "test1@elhomeo.com"
+#define SENDER_PASSWORD ")jx!-BXqIQIK"
+
+// SMTP 設定
+SMTPSession smtp;
 
 #define EEPROM_SIZE 192
 #define SSID_ADDR 0
@@ -33,6 +42,16 @@ const unsigned long reconnectInterval = 10000; // 每 10 秒嘗試一次
 String timeMode = "Full-Time"; // 預設值
 // 新增全域變數儲存郵件通知名單
 String alertEmails = ""; // 預設為空
+String msg_log = ""; // 用於記錄系統訊息
+
+//一般用法：logMessage("你的訊息"); // 會自動加入時間戳記
+//不需要時間戳記：logMessage("你的訊息", false); // 不會加入時間戳記
+void logMessage(String message, bool addDateTime = true) {
+  String logMsg = addDateTime ? getDateTime() + " - " + message : message;
+  if (!logMsg.endsWith("\n")) logMsg += "\n";
+  Serial.print(logMsg);
+  msg_log += logMsg;
+}
 
 // 儲存時間設定與郵件通知到 EEPROM
 void saveSettings() {
@@ -159,9 +178,9 @@ String htmlPage(String message = "", String timeInfo = "") {
           <option value="Full-Time")rawliteral";
     if (timeMode == "Full-Time") page += " selected";
     page += R"rawliteral(>Full-Time</option>
-          <option value="23:00-06:00")rawliteral";
-    if (timeMode == "23:00-06:00") page += " selected";
-    page += R"rawliteral(>23:00-06:00</option>
+          <option value="22:00-06:00")rawliteral";
+    if (timeMode == "22:00-06:00") page += " selected";
+    page += R"rawliteral(>22:00-06:00</option>
         </select>
         <div class="mt-3">
           <label for="emails" class="form-label">郵件通知 (多個請用 ; 分隔)</label>
@@ -181,15 +200,18 @@ String htmlPage(String message = "", String timeInfo = "") {
           <div class="mt-3">
             <button onclick="checkStatus()" class="btn btn-info">檢查系統狀態</button>
             <div id="gpioStatus" class="mt-2"></div>
+            <textarea id="msgLog" class="form-control mt-2" rows="5" readonly></textarea>
           </div>
           <script>
           function checkStatus() {
             Promise.all([
               fetch('/gpio').then(response => response.text()),
-              fetch('/time').then(response => response.text())
-            ]).then(([gpioData, timeData]) => {
+              fetch('/time').then(response => response.text()),
+              fetch('/getlog').then(response => response.text())
+            ]).then(([gpioData, timeData, logData]) => {
               document.getElementById('gpioStatus').innerHTML = gpioData;
               document.getElementById('time').innerText = timeData;
+              document.getElementById('msgLog').value = logData;
             });
           }
           </script>
@@ -233,16 +255,13 @@ void handleConnect() {
     saveWiFiInfo(wifiSSID, wifiPASS);
     timeClient.begin();
     server.send(200, "text/html", htmlPage("連線成功並已儲存設定!", getDateTime()));
-    Serial.print(getDateTime());
-    Serial.println(" - 連線成功並已儲存設定!");
-
+    logMessage("連線成功並已儲存設定!");
   } else {
     isConnected = false;
     WiFi.mode(WIFI_AP);
     WiFi.softAP(apSSID, apPassword);
     server.send(200, "text/html", htmlPage("連線失敗，請重新輸入!", ""));
-    Serial.print(getDateTime());
-    Serial.println(" - 連線失敗，請重新輸入!");
+    logMessage("連線失敗，請重新輸入!");
   }
 }
 
@@ -254,8 +273,7 @@ void handleDisconnect() {
   WiFi.mode(WIFI_AP);
   WiFi.softAP(apSSID, apPassword);
   server.send(200, "text/html", htmlPage("已結束連線，並清除設定", ""));
-  Serial.print(getDateTime());
-  Serial.println(" - 已結束連線，並清除設定");
+  logMessage("已結束連線，並清除設定");
 }
 
 void handleTime() {
@@ -267,10 +285,10 @@ void handleGPIO() {
   String status;
   if (state == LOW) {
     status = "<div class='text-danger'>門窗狀態：開啟</div>";
-    Serial.println("門窗狀態：開啟");
+    logMessage("門窗狀態：開啟", false);
   } else {
     status = "<div class='text-success'>門窗狀態：關閉</div>";
-    Serial.println("門窗狀態：關閉");
+    logMessage("門窗狀態：關閉", false);
   }
   server.send(200, "text/html", status);
 }
@@ -279,23 +297,83 @@ void handleGPIO() {
 void handleSetTime() {
   if (server.hasArg("timemode")) {
     timeMode = server.arg("timemode");
-    Serial.print("時間設定已變更為: ");
-    Serial.println(timeMode);
+    logMessage("時間設定已變更為: " + timeMode);
   }
   if (server.hasArg("emails")) {
     alertEmails = server.arg("emails");
-    Serial.print("郵件通知已變更為: ");
-    Serial.println(alertEmails);
+    logMessage("郵件通知已變更為: " + alertEmails);
   }
   saveSettings(); // 設定後存入 EEPROM
   String timeStr = isConnected ? getDateTime() : "";
   server.send(200, "text/html", htmlPage("設定已更新", timeStr));
 }
 
+void handleGetLog() {
+  String currentLog = msg_log;
+  msg_log = ""; // 清空日誌
+  server.send(200, "text/plain", currentLog);
+}
+
+// 寄送郵件通知
+void sendEmail(String recipients, String subject, String message) {
+  if (!isConnected) {
+    logMessage("無法寄送郵件：未連線至網路");
+    return;
+  }
+  // 建立 SMTP 郵件內容
+  SMTP_Message email;
+  
+  email.sender.name = "ELHOMEO 守門員";
+  email.sender.email = SENDER_EMAIL;
+  email.subject = subject;
+  email.text.content = message;
+  email.text.charSet = "utf-8";
+
+  // 處理多個收件者（以分號分隔）
+  int lastIndex = 0;
+  int index = recipients.indexOf(';');
+  while (index != -1) {
+    String recipient = recipients.substring(lastIndex, index);
+    recipient.trim();  // 移除前後空白
+    if (recipient.length() > 0) {
+      email.addRecipient("User", recipient.c_str());
+    }
+    lastIndex = index + 1;
+    index = recipients.indexOf(';', lastIndex);
+  }
+  // 處理最後一個收件者
+  String lastRecipient = recipients.substring(lastIndex);
+  lastRecipient.trim();
+  if (lastRecipient.length() > 0) {
+    email.addRecipient("User", lastRecipient.c_str());
+  }
+  
+  // SMTP 連線設定
+  ESP_Mail_Session session;
+  session.server.host_name = SMTP_HOST;
+  session.server.port = SMTP_PORT;
+  session.login.email = SENDER_EMAIL;
+  session.login.password = SENDER_PASSWORD;
+  session.login.user_domain = "";
+
+  // 連線到 SMTP 伺服器
+  if (!smtp.connect(&session)) {
+    logMessage("郵件伺服器連線失敗：" + smtp.errorReason());
+    return;
+  }
+
+  // 寄送郵件
+  if (!MailClient.sendMail(&smtp, &email)) {
+    logMessage("郵件發送失敗：" + smtp.errorReason());
+  } else {
+    logMessage("郵件發送成功");
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   pinMode(GPIO_2, INPUT); // DOOR sensor pin
-  Serial.println("系統啟動中...");
+  logMessage("系統啟動中...");
 
   loadSettings(); // 開機時讀取時間設定與郵件通知
 
@@ -305,18 +383,18 @@ void setup() {
 
     int attempt = 0;
     while (WiFi.status() != WL_CONNECTED && attempt < 20) {
-      Serial.println("Wifi連線失敗, 重試.....");
+      logMessage("Wifi連線失敗, 重試.....");
       delay(1000);
       attempt++;
     }
 
     if (WiFi.status() == WL_CONNECTED) {
       isConnected = true;
-      Serial.println("Wifi已連線");
+      logMessage("Wifi已連線");
       timeClient.begin();
     } else {
       isConnected = false;
-      Serial.println("Wifi已斷線, 啟動AP模式");
+      logMessage("Wifi已斷線, 啟動AP模式");
       WiFi.mode(WIFI_AP);
       WiFi.softAP(apSSID, apPassword);
     }
@@ -331,42 +409,44 @@ void setup() {
   server.on("/time", handleTime);
   server.on("/gpio", HTTP_GET, handleGPIO);
   server.on("/settime", HTTP_POST, handleSetTime);
+  server.on("/getlog", HTTP_GET, handleGetLog);
   server.begin();
 }
 
 void loop() {
   // 讀取 DOOR sensor 狀態
   int doorState = digitalRead(GPIO_2);
-
+  
   // 檢查狀態是否有變化
   if (doorState == LOW && !door_open) {
     door_open = true;
-    Serial.println("DOOR sensor 主動偵測到開啟");
+    logMessage("DOOR sensor 主動偵測到開啟");
+    
     // 判斷是否在通知時段
     bool notify = false;
     if (timeMode == "Full-Time") {
       notify = true;
-    } else if (timeMode == "23:00-06:00") {
+    } else if (timeMode == "22:00-06:00") {
       time_t rawTime = timeClient.getEpochTime();
       struct tm *timeinfo = localtime(&rawTime);
       int hour = timeinfo->tm_hour;
-      // 23:00~23:59 或 0:00~5:59
-      if (hour >= 23 || hour < 6) notify = true;
+      // 22:00~23:59 或 0:00~5:59
+      if (hour >= 22 || hour < 6) notify = true;
     }
 
     if (notify && alertEmails.length() > 0) {
-      // 寄送通知信件
-      Serial.print("寄送通知信件給: ");
-      Serial.println(alertEmails);
+      logMessage("寄送門窗開啟警報通知至: " + alertEmails);
       // 這裡可呼叫 SMTP 函式或其他通知機制
-      // sendEmail(alertEmails, "門窗開啟警報", "門窗於 " + getDateTime() + " 被開啟!");
+      sendEmail(alertEmails, "門窗開啟警報", "門窗於 " + getDateTime() + " 被開啟!");
     }
-    // 可在此觸發其他通知機制（如蜂鳴器、推播等）
-
+    //暫停3秒，避免重複觸發
+    delay(3000); // 避免重複觸發
   } else if (doorState == HIGH && door_open) {
     door_open = false;
-    Serial.println("DOOR sensor 主動偵測到關閉");
+    logMessage("DOOR sensor 主動偵測到關閉");
     // 可在此觸發其他通知機制
+    //暫停3秒，避免重複觸發
+    delay(3000); // 避免重複觸發
   }
   
   server.handleClient();
@@ -376,7 +456,7 @@ void loop() {
     if (WiFi.status() != WL_CONNECTED) {
       unsigned long currentMillis = millis();
       if (currentMillis - lastReconnectAttempt > reconnectInterval) {
-        Serial.println("[系統] 偵測到 WiFi 斷線，嘗試重新連線...");
+        logMessage("偵測到 WiFi 斷線，嘗試重新連線...");
         WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
         lastReconnectAttempt = currentMillis;
       }
