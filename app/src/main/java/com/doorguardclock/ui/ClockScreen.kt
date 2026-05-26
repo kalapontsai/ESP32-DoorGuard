@@ -9,9 +9,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.doorguardclock.data.IoTService
 import com.doorguardclock.viewmodel.ClockViewModel
 
 @Composable
@@ -22,8 +24,18 @@ fun ClockScreen(
     val currentTime by viewModel.currentTime.collectAsState()
     val currentDate by viewModel.currentDate.collectAsState()
     val settings by viewModel.settings.collectAsState()
-    val doorStatus by viewModel.doorStatus.collectAsState()
-    val doorStatusText by viewModel.doorStatusText.collectAsState()
+
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp
+    val screenHeightDp = configuration.screenHeightDp
+    val isLandscape = screenWidthDp > screenHeightDp
+
+    // Use the dimension that corresponds to the text layout direction
+    val textAreaDimension = if (isLandscape) screenHeightDp else screenWidthDp
+
+    // Calculate font sizes based on the effective text area
+    val timeFontSize = (textAreaDimension * 0.42f).toInt().sp
+    val dateFontSize = (textAreaDimension * 0.16f).toInt().sp
 
     val backgroundColor = Color(settings.backgroundColor)
     val textColor = viewModel.getCurrentTextColor()
@@ -42,38 +54,23 @@ fun ClockScreen(
             // Time display
             Text(
                 text = currentTime,
-                fontSize = 96.sp,
+                fontSize = timeFontSize,
                 fontWeight = FontWeight.Bold,
-                color = textColor
+                color = textColor,
+                textAlign = TextAlign.Center,
+                lineHeight = timeFontSize * 1.1f
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
             // Date display
             Text(
                 text = currentDate,
-                fontSize = 36.sp,
+                fontSize = dateFontSize,
                 fontWeight = FontWeight.Normal,
-                color = textColor.copy(alpha = 0.8f)
+                color = textColor.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center
             )
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Door status indicator
-            if (doorStatusText.isNotEmpty()) {
-                val statusColor = when (doorStatus) {
-                    IoTService.DoorStatus.OPEN -> Color(0xFFFF0000)
-                    IoTService.DoorStatus.CLOSED -> Color(0xFF00FF00)
-                    else -> textColor.copy(alpha = 0.6f)
-                }
-
-                Text(
-                    text = doorStatusText,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = statusColor
-                )
-            }
         }
     }
 }

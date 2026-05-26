@@ -24,6 +24,9 @@ class MainActivity : ComponentActivity() {
         // Enable fullscreen mode
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
+        // Keep screen on while app is active
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
         windowInsetsController.apply {
             hide(WindowInsetsCompat.Type.systemBars())
@@ -40,7 +43,6 @@ class MainActivity : ComponentActivity() {
             DisposableEffect(settings.autoBrightness, settings.manualBrightness) {
                 if (settings.autoBrightness) {
                     // Let system handle brightness
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 } else {
                     // Set manual brightness
                     val brightness = settings.manualBrightness / 255f
@@ -70,8 +72,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Ensure fullscreen when resuming
-        val windowInsetsController = WindowCompat.getInsetsController(window, window.decorView)
-        windowInsetsController.hide(WindowInsetsCompat.Type.systemBars())
+        // Keep screen on
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 }

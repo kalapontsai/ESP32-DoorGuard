@@ -23,6 +23,4 @@ val colorPresets = listOf(
     Color(0xFFA52A2A), // Brown
 )
 
-fun Color.toArgbInt(): Int = this.toArgb()
-
 fun Int.toComposeColor(): Color = Color(this)
