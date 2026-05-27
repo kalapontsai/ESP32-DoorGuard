@@ -24,3 +24,11 @@ val colorPresets = listOf(
 )
 
 fun Int.toComposeColor(): Color = Color(this)
+
+fun Color.toArgbInt(): Int {
+    val red = (this.red * 255).toInt()
+    val green = (this.green * 255).toInt()
+    val blue = (this.blue * 255).toInt()
+    val alpha = (this.alpha * 255).toInt()
+    return (alpha shl 24) or (red shl 16) or (green shl 8) or blue
+}

@@ -127,6 +127,12 @@ class ClockViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateFontSizes(portraitTime: Float, portraitDate: Float, landscapeTime: Float, landscapeDate: Float) {
+        viewModelScope.launch {
+            settingsRepository.updateFontSizes(portraitTime, portraitDate, landscapeTime, landscapeDate)
+        }
+    }
+
     // Manual door status check
     fun refreshDoorStatus() {
         val s = settings.value

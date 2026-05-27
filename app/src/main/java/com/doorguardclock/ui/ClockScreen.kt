@@ -3,7 +3,6 @@ package com.doorguardclock.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,9 +32,18 @@ fun ClockScreen(
     // Use the dimension that corresponds to the text layout direction
     val textAreaDimension = if (isLandscape) screenHeightDp else screenWidthDp
 
-    // Calculate font sizes based on the effective text area
-    val timeFontSize = (textAreaDimension * 0.42f).toInt().sp
-    val dateFontSize = (textAreaDimension * 0.16f).toInt().sp
+    // Get font sizes from settings (stored as percentages, e.g., 54.6 = 0.546)
+    val timeFontSize = if (isLandscape) {
+        (textAreaDimension * (settings.landscapeTimeSize / 100f)).toInt().sp
+    } else {
+        (textAreaDimension * (settings.portraitTimeSize / 100f)).toInt().sp
+    }
+
+    val dateFontSize = if (isLandscape) {
+        (textAreaDimension * (settings.landscapeDateSize / 100f)).toInt().sp
+    } else {
+        (textAreaDimension * (settings.portraitDateSize / 100f)).toInt().sp
+    }
 
     val backgroundColor = Color(settings.backgroundColor)
     val textColor = viewModel.getCurrentTextColor()

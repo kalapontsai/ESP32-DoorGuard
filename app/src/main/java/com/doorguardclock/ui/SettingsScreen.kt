@@ -17,12 +17,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.doorguardclock.data.IoTService
 import com.doorguardclock.ui.theme.colorPresets
+import com.doorguardclock.ui.theme.toArgbInt
 import com.doorguardclock.viewmodel.ClockViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,6 +46,12 @@ fun SettingsScreen(
     var iotUrl by remember { mutableStateOf(settings.iotUrl) }
     var pollingInterval by remember { mutableStateOf(settings.pollingInterval.toString()) }
 
+    // Font size settings
+    var portraitTimeSize by remember { mutableStateOf(settings.portraitTimeSize.toString()) }
+    var portraitDateSize by remember { mutableStateOf(settings.portraitDateSize.toString()) }
+    var landscapeTimeSize by remember { mutableStateOf(settings.landscapeTimeSize.toString()) }
+    var landscapeDateSize by remember { mutableStateOf(settings.landscapeDateSize.toString()) }
+
     var showBackgroundPicker by remember { mutableStateOf(false) }
     var showTextColorPicker by remember { mutableStateOf(false) }
     var showAlertColorPicker by remember { mutableStateOf(false) }
@@ -59,6 +65,10 @@ fun SettingsScreen(
         alertTextColor = Color(settings.alertTextColor)
         iotUrl = settings.iotUrl
         pollingInterval = settings.pollingInterval.toString()
+        portraitTimeSize = settings.portraitTimeSize.toString()
+        portraitDateSize = settings.portraitDateSize.toString()
+        landscapeTimeSize = settings.landscapeTimeSize.toString()
+        landscapeDateSize = settings.landscapeDateSize.toString()
     }
 
     Scaffold(
@@ -69,11 +79,17 @@ fun SettingsScreen(
                     TextButton(onClick = {
                         viewModel.updateBrightness(autoBrightness, manualBrightness.toInt())
                         viewModel.updateColors(
-                            backgroundColor.toArgb(),
-                            textColor.toArgb(),
-                            alertTextColor.toArgb()
+                            backgroundColor.toArgbInt(),
+                            textColor.toArgbInt(),
+                            alertTextColor.toArgbInt()
                         )
                         viewModel.updateIoTSettings(iotUrl, pollingInterval.toIntOrNull() ?: 5)
+                        viewModel.updateFontSizes(
+                            portraitTimeSize.toFloatOrNull() ?: 54.6f,
+                            portraitDateSize.toFloatOrNull() ?: 8f,
+                            landscapeTimeSize.toFloatOrNull() ?: 54.6f,
+                            landscapeDateSize.toFloatOrNull() ?: 8f
+                        )
                         onNavigateBack()
                     }) {
                         Text("返回")
@@ -143,6 +159,71 @@ fun SettingsScreen(
                 color = alertTextColor,
                 onClick = { showAlertColorPicker = true }
             )
+
+            Divider(modifier = Modifier.padding(vertical = 16.dp))
+
+            // === Font Size Section ===
+            Text(
+                text = "字體大小（%）",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+
+            Text(
+                text = "直式模式",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = portraitTimeSize,
+                    onValueChange = { portraitTimeSize = it },
+                    label = { Text("時間") },
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = portraitDateSize,
+                    onValueChange = { portraitDateSize = it },
+                    label = { Text("日期") },
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+            }
+
+            Text(
+                text = "橫式模式",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = landscapeTimeSize,
+                    onValueChange = { landscapeTimeSize = it },
+                    label = { Text("時間") },
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = landscapeDateSize,
+                    onValueChange = { landscapeDateSize = it },
+                    label = { Text("日期") },
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+            }
 
             Divider(modifier = Modifier.padding(vertical = 16.dp))
 
