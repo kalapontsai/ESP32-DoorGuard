@@ -142,21 +142,24 @@ fun SettingsScreen(
                 modifier = Modifier.padding(vertical = 8.dp)
             )
 
-            ColorRow(
+            ColorRowWithHex(
                 label = "背景顏色",
                 color = backgroundColor,
+                onColorChange = { backgroundColor = it },
                 onClick = { showBackgroundPicker = true }
             )
 
-            ColorRow(
+            ColorRowWithHex(
                 label = "字體顏色（正常）",
                 color = textColor,
+                onColorChange = { textColor = it },
                 onClick = { showTextColorPicker = true }
             )
 
-            ColorRow(
+            ColorRowWithHex(
                 label = "字體顏色（門窗開啟）",
                 color = alertTextColor,
+                onColorChange = { alertTextColor = it },
                 onClick = { showAlertColorPicker = true }
             )
 
@@ -345,29 +348,126 @@ fun SettingsScreen(
     }
 }
 
+/**
+ * 將 Color 轉為 6 位 HEX 顯示字串 (例如 "FF0000")
+ * 不含 "#"，依使用者輸入習慣保留彈性
+ */
+private fun colorToHexString(color: Color): String {
+    val r = (color.red * 255).toInt().coerceIn(0, 255)
+    val g = (color.green * 255).toInt().coerceIn(0, 255)
+    val b = (color.blue * 255).toInt().coerceIn(0, 255)
+    return "%02X%02X%02X".format(r, g, b)
+}
+
+/**
+ * 解析使用者輸入的 HEX 顏色字串
+ * 支援格式: "#RRGGBB" / "RRGGBB" / "#AARRGGBB" / "AARRGGBB"
+ * @return 解析成功回傳 Color，否則回傳 null
+ */
+private fun parseHexColor(input: String): Color? {
+    val cleaned = input.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
+    if (cleaned.isEmpty()) return null
+    return try {
+        when (cleaned.length) {
+            6 -> {
+                // RGB
+                val v = cleaned.toLong(16)
+                val r = ((v shr 16) and 0xFF).toInt()
+                val g = ((v shr 8) and 0xFF).toInt()
+                val b = (v and 0xFF).toInt()
+                Color(red = r, green = g, blue = b, alpha = 255)
+            }
+            8 -> {
+                // ARGB
+                val v = cleaned.toLong(16)
+                val a = ((v shr 24) and 0xFF).toInt()
+                val r = ((v shr 16) and 0xFF).toInt()
+                val g = ((v shr 8) and 0xFF).toInt()
+                val b = (v and 0xFF).toInt()
+                Color(red = r, green = g, blue = b, alpha = a)
+            }
+            else -> null
+        }
+    } catch (e: NumberFormatException) {
+        null
+    }
+}
+
+/**
+ * 顏色設定行：色塊 + HEX 文字輸入框
+ * - 點擊色塊打開調色盤
+ * - 輸入框可手動輸入 HEX，立即套用；無效輸入會以紅色標示
+ */
 @Composable
-private fun ColorRow(
+private fun ColorRowWithHex(
     label: String,
     color: Color,
+    onColorChange: (Color) -> Unit,
     onClick: () -> Unit
 ) {
-    Row(
+    var hexText by remember(color) { mutableStateOf(colorToHexString(color)) }
+    var isError by remember { mutableStateOf(false) }
+
+    // 對外顏色變動時（調色盤選色）同步更新輸入框
+    LaunchedEffect(color) {
+        hexText = colorToHexString(color)
+        isError = false
+    }
+
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 4.dp)
     ) {
-        Text(
-            text = label,
-            modifier = Modifier.weight(1f)
-        )
-        Box(
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                modifier = Modifier.weight(1f)
+            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(color)
+                    .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                    .clickable { onClick() }
+            )
+        }
+        OutlinedTextField(
+            value = hexText,
+            onValueChange = { newValue ->
+                // 允許使用者輸入中包含 #，最多 9 字元 (#AARRGGBB)
+                val filtered = newValue.uppercase().let { v ->
+                    if (v.length > 9) v.take(9) else v
+                }
+                hexText = filtered
+                val parsed = parseHexColor(filtered)
+                if (parsed != null) {
+                    isError = false
+                    onColorChange(parsed)
+                } else {
+                    isError = filtered.isNotEmpty()
+                }
+            },
+            label = { Text("HEX 顏色代碼") },
+            placeholder = { Text("例如: FF0000 或 #FF0000") },
             modifier = Modifier
-                .size(32.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(color)
-                .border(1.dp, Color.Gray, RoundedCornerShape(4.dp))
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            singleLine = true,
+            isError = isError,
+            supportingText = {
+                if (isError) {
+                    Text(
+                        text = "格式錯誤，請輸入 6 位 (RRGGBB) 或 8 位 (AARRGGBB) HEX",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
         )
     }
 }
